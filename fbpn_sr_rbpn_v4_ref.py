@@ -10,7 +10,7 @@ from torch.autograd import Variable
 from fbpn_sr_rbpn_v4 import Net as FBPNSR_RBPN_V4
 
 class Net(nn.Module):
-    def __init__(self, base_filter, feat, num_stages, n_resblock, scale_factor, pretrained=False, freeze=False):
+    def __init__(self, base_filter, feat, num_stages, n_resblock, weights, scale_factor, pretrained=False, freeze=False):
         super(Net, self).__init__()    
         
         if scale_factor == 2:
@@ -26,7 +26,7 @@ class Net(nn.Module):
         	stride = 8
         	padding = 2
         
-        self.model = FBPNSR_RBPN_V4(base_filter=base_filter,  feat = feat, num_stages=num_stages, n_resblock=n_resblock, scale_factor=scale_factor) 
+        self.model = FBPNSR_RBPN_V4(base_filter=base_filter,  feat = feat, num_stages=num_stages, n_resblock=n_resblock, weights=weights, scale_factor=scale_factor)
         self.flow_net = UNet(8,2)
         
         if pretrained:

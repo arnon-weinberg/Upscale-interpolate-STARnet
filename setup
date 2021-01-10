@@ -1,0 +1,86 @@
+#!/bin/ksh
+# This script just checks for some dependencies and, if needed, installs
+# missing Python packages in a virtual environment (local directory).
+# It does not require root, and all changes are local, so uninstalling the
+# project is a simple matter of removing its directory.
+
+if [[ $0 != "setup" ]]
+then
+  echo "Please run this script from its directory."
+  exit
+fi
+
+if [[ -e "pytorch/bin/activate" ]]
+then
+  . pytorch/bin/activate
+fi
+if ! python3 -c 'import sys; assert sys.version_info >= (3,5)' >/dev/null 2>&1
+then
+  echo "Python >=3.5 is required for this script."
+  exit
+fi
+
+echo "Checking for required Python packages..."
+
+# RBPN is not compatible with newer versions of scipy:
+if ! pip3 show scipy | egrep '^Version: 1.2.0$' >/dev/null
+then
+  echo "WARNING: Package(s) not found: scipy==1.2.0"
+  install="$install scipy==1.2.0"
+fi
+for pkg in scikit-image opencv-python torchvision Cython
+do
+  if ! pip3 show $pkg >/dev/null
+  then
+    install="$install $pkg"
+  fi
+done
+
+if [ "$install" ]
+then
+  echo "Installing missing packages:$install..."
+  echo
+
+  python3 -m venv pytorch
+  . pytorch/bin/activate
+  pip --no-cache-dir install --upgrade pip
+  pip --no-cache-dir install$install
+  echo
+fi
+
+# Note that successful compilation requires: C++, Python development libraries
+# >sudo yum install -y gcc-c++ python3-devel
+# They can safely be removed after installation.
+if ! ls pyflow.cpython-*.so >/dev/null 2>&1
+then
+  echo "Installing PyFlow..."
+  echo
+
+  cd pyflow
+  python setup.py build_ext -i
+  cd ..
+  if ! ls pyflow/pyflow.cpython-*.so >/dev/null 2>&1
+  then
+    echo
+    echo "Pyflow installation failed."
+    exit
+  fi
+  ln -s pyflow/pyflow.cpython-*.so .
+  echo
+fi
+
+# Attempt to run the script:
+echo
+upscale --help
+echo
+
+# ffmpeg is optional; used for extracting frames from video files.
+if ! which ffmpeg >/dev/null 2>&1
+then
+  echo "Just noting that ffmpeg is not installed."
+  echo
+fi
+
+echo "If there are no errors, then setup completed successfully.  Now run:"
+echo ">source pytorch/bin/activate"
+echo ">upscale --help"

@@ -9,7 +9,7 @@ from autoencoder_v4 import UNet
 from torch.autograd import Variable
 
 class Net(nn.Module):
-    def __init__(self, base_filter, feat, num_stages, n_resblock, scale_factor, pretrained=True, freeze=False):
+    def __init__(self, base_filter, feat, num_stages, n_resblock, weights, scale_factor, pretrained=True, freeze=False):
         super(Net, self).__init__()    
         
         if scale_factor == 2:
@@ -102,10 +102,7 @@ class Net(nn.Module):
         		    m.bias.data.zero_()
         
         if pretrained:
-            if scale_factor == 4:
-                self.RBPN.load_state_dict(torch.load("weights/pretrained/rbpn_pretrained_F2_4x.pth", map_location=lambda storage, loc: storage))    
-            elif scale_factor == 2:
-                self.RBPN.load_state_dict(torch.load("weights/pretrained/rbpn_pretrained_F2_2x.pth", map_location=lambda storage, loc: storage))    
+            self.RBPN.load_state_dict(torch.load(weights, map_location=lambda storage, loc: storage))
             
         if freeze:
             self.freeze_model(self.RBPN)

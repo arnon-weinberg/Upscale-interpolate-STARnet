@@ -29,7 +29,7 @@ import pdb
 parser = argparse.ArgumentParser(description='PyTorch Super Res Example')
 parser.add_argument('--upscale_factor', type=int, default=4, help="super resolution upscale factor")
 parser.add_argument('--testBatchSize', type=int, default=1, help='testing batch size')
-parser.add_argument('--gpu_mode', type=bool, default=True)
+parser.add_argument('--gpu_mode', type=bool, default=True) # Use GPU or CPU
 parser.add_argument('--chop_forward', type=bool, default=False)
 parser.add_argument('--threads', type=int, default=1, help='number of threads for data loader to use')
 parser.add_argument('--seed', type=int, default=123, help='random seed to use. Default=123')
@@ -52,6 +52,8 @@ if cuda and not torch.cuda.is_available():
 torch.manual_seed(opt.seed)
 if cuda:
     torch.cuda.manual_seed(opt.seed)
+else:
+    torch.manual_seed(opt.seed)
 
 print('===> Loading datasets')
 test_set = get_test_set(opt.data_dir, opt.upscale_factor, opt.file_list)
@@ -77,6 +79,8 @@ elif opt.model_type == 'FBPNSR_RBPN_V4':
     
 if cuda:
     model = torch.nn.DataParallel(model, device_ids=gpus_list)
+else:
+    model = torch.nn.DataParallel(model, device_ids=['cpu'])
 
 def print_network(net):
     num_params = 0
@@ -104,10 +108,16 @@ def eval():
         input, flow_f, flow_b, filename, d_dir = batch[0], batch[1], batch[2], batch[3], batch[4]
         
         with torch.no_grad():
-            t_im1 = Variable(input[0]).cuda(gpus_list[0])
-            t_im2 = Variable(input[1]).cuda(gpus_list[0])
-            t_flow_f = Variable(flow_f).cuda(gpus_list[0]).float()
-            t_flow_b = Variable(flow_b).cuda(gpus_list[0]).float()
+            if cuda:
+                t_im1 = Variable(input[0]).cuda(gpus_list[0])
+                t_im2 = Variable(input[1]).cuda(gpus_list[0])
+                t_flow_f = Variable(flow_f).cuda(gpus_list[0]).float()
+                t_flow_b = Variable(flow_b).cuda(gpus_list[0]).float()
+            else:
+                t_im1 = Variable(input[0])
+                t_im2 = Variable(input[1])
+                t_flow_f = Variable(flow_f).float()
+                t_flow_b = Variable(flow_b).float()
                         
         if opt.chop_forward:
             with torch.no_grad():
