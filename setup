@@ -10,6 +10,15 @@ then
   exit
 fi
 
+if [[ ! -e "weights/FBPNSR_RBPN_V4_REF_Lr_STAR_ST.pth" ]]
+then
+  echo "Downloading pretrained weights..."
+  echo
+
+  wget -P weights http://technology.research-lab.ca/???/FBPNSR_RBPN_V4_REF_Lr_STAR_ST.pth
+  echo
+fi
+
 if [[ -e "pytorch/bin/activate" ]]
 then
   . pytorch/bin/activate
