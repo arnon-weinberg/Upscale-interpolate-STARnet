@@ -2,7 +2,7 @@
 
 ### Increase video resolution with an opensource machine learning algorithm for upscaling and interpolating video image frames using an automated command line script.
 
-For details: http://technology.research-lab.ca/???
+For details: http://technology.research-lab.ca/2021/01/upscale-and-interpolate-video-super-resolution-using-starnet/
 
 ## Citations
 ```
