@@ -4,11 +4,7 @@
 # It does not require root, and all changes are local, so uninstalling the
 # project is a simple matter of removing its directory.
 
-if [[ $0 != "setup" ]]
-then
-  echo "Please run this script from its directory."
-  exit
-fi
+cd $(dirname ${0})
 
 if [[ ! -e "weights/FBPNSR_RBPN_V4_REF_Lr_STAR_ST.pth" ]]
 then
@@ -66,7 +62,7 @@ then
   echo
 
   cd pyflow
-  python setup.py build_ext -i
+  python3 setup.py build_ext -i
   cd ..
   if ! ls pyflow/pyflow.cpython-*.so >/dev/null 2>&1
   then
@@ -91,5 +87,5 @@ then
 fi
 
 echo "If there are no errors, then setup completed successfully.  Now run:"
-echo ">source pytorch/bin/activate"
-echo ">upscale --help"
+echo ">source $(dirname ${0})/pytorch/bin/activate"
+echo ">$(dirname ${0})/upscale --help"

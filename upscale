@@ -83,7 +83,8 @@ if os.path.isfile ( opt.input ):
   command += ' -i '+shlex.quote(opt.input)
 
   output = '%06d.png'
-  if   opt.scene['st'] is not None:
+  if   not opt.scene: pass
+  elif opt.scene['st'] is not None:
     command += f" -ss {opt.scene['st']}"
     output = f"{opt.scene['st']}+%06d.png"
     if   opt.scene['et'] is not None: command += f" -to {opt.scene['et']}"
