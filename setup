@@ -1,8 +1,14 @@
-#!/bin/ksh
-# This script just checks for some dependencies and, if needed, installs
-# missing Python packages in a virtual environment (local directory).
-# It does not require root, and all changes are local, so uninstalling the
-# project is a simple matter of removing its directory.
+#!/bin/sh
+# This script attempts to install PyTorch in a virtual environment (local
+# directory = ./pytorch).  It will try the conda installer by default, but if
+# that fails, then try the pip installer instead:
+# >rm -rf pytorch
+# >env installer=pip setup
+# It then attempts to install PyFlow.  Note that successful compilation
+# requires C++ and Python development libraries:
+# >sudo dnf install -y gcc-c++ python3-devel
+# Root is not required otherwise, and all changes are local, so uninstalling
+# the project is a simple matter of removing its directory.
 
 cd $(dirname ${0})
 
@@ -17,52 +23,82 @@ fi
 
 if [[ -e "pytorch/bin/activate" ]]
 then
-  . pytorch/bin/activate
-fi
-if ! python3 -c 'import sys; assert sys.version_info >= (3,5)' >/dev/null 2>&1
-then
-  echo "Python >=3.5 is required for this script."
-  exit
-fi
+  source pytorch/bin/activate
+else
+  echo "Setting up a virtual environment for PyTorch..."
+  echo
 
-echo "Checking for required Python packages..."
-
-# RBPN is not compatible with newer versions of scipy:
-if ! pip3 show scipy | egrep '^Version: 1.2.0$' >/dev/null
-then
-  echo "WARNING: Package(s) not found: scipy==1.2.0"
-  install="$install scipy==1.2.0"
-fi
-for pkg in scikit-image opencv-python torchvision Cython
-do
-  if ! pip3 show $pkg >/dev/null
+  if [[ "$installer" == "pip" ]]
   then
-    install="$install $pkg"
+    # Install via pip:
+    python3 -m venv pytorch
+    source pytorch/bin/activate
+    pip --no-cache-dir install --upgrade pip
+  else
+    # Install via conda:
+    if ! ls pytorch/*.sh >/dev/null 2>&1
+    then
+      mkdir -p pytorch
+      # Note: If this is the wrong link, then please download Miniconda
+      # manually and try again...
+      wget -P pytorch https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+    fi
+
+    sh pytorch/*.sh -b -p pytorch -f
+    rm pytorch/*.sh
+    source pytorch/bin/activate
+    # Older Python is required to reduce forward-compatibility problems:
+    conda install -y python=3.7
   fi
-done
-
-if [ "$install" ]
-then
-  echo "Installing missing packages:$install..."
-  echo
-
-  python3 -m venv pytorch
-  . pytorch/bin/activate
-  pip --no-cache-dir install --upgrade pip
-  pip --no-cache-dir install$install
   echo
 fi
 
-# Note that successful compilation requires: C++, Python development libraries
-# >sudo yum install -y gcc-c++ python3-devel
-# They can safely be removed after installation.
+if [[ "$CONDA_DEFAULT_ENV" ]]
+then
+  installer=conda
+else
+  installer=pip
+fi
+echo "Installing PyTorch - using $installer installer..."
+echo
+
+if [[ "$installer" == "pip" ]]
+then
+  # Install via pip:
+  cat <<EOF >pytorch/requirements.txt
+scikit-image
+opencv-python
+torchvision==0.8.2
+Cython
+scipy==1.2.0
+EOF
+
+  pip --no-cache-dir install -r pytorch/requirements.txt
+else
+  # Install via conda:
+  cat <<EOF >pytorch/requirements.txt
+scikit-image
+opencv
+torchvision=0.8.2
+cython
+scipy=1.2.0
+EOF
+
+  conda install -y --file pytorch/requirements.txt
+  # Conda installs FFmpeg with x264 disabled :-(
+  mv pytorch/bin/ffmpeg pytorch/bin/ffmpeg.conda
+fi
+# Check results using:
+# >python -c 'from torch.utils.collect_env import main; main()'
+echo
+
 if ! ls pyflow.cpython-*.so >/dev/null 2>&1
 then
   echo "Installing PyFlow..."
   echo
 
   cd pyflow
-  python3 setup.py build_ext -i
+  python setup.py build_ext -i
   cd ..
   if ! ls pyflow/pyflow.cpython-*.so >/dev/null 2>&1
   then
@@ -82,7 +118,7 @@ echo
 # ffmpeg is optional; used for extracting frames from video files.
 if ! which ffmpeg >/dev/null 2>&1
 then
-  echo "Just noting that ffmpeg is not installed."
+  echo "Just noting that ffmpeg is not found."
   echo
 fi
 

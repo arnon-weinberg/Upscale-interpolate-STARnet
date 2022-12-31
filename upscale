@@ -1,13 +1,17 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # This script takes a directory of *.png input frame images, upscales them
 # using the FBPNSR model pre-trained weights, and dumps the resulting frame
 # images in the given output directory.
 #
 # >upscale --help
 
+#??? Support multiple scenes?  Support interpolation?
+#??? Once ffmpeg is upgraded: Test -frame_pts true (is it pts or pts_time?)
+#???                          -vsync is deprecated. Use -fps_mode
+
 import argparse
 import sys, os, time
-import re, glob, shlex
+import re, glob
 import torch
 import torch.utils.data as data
 import PIL, cv2
@@ -18,6 +22,7 @@ from torch.autograd import Variable
 import utils
 from math import ceil
 import functools
+from ffmpeg import ffmpeg_extract_frames, ffmpeg_replace_frames
 print = functools.partial(print, flush=True) # Auto-flush output
 
 parser = argparse.ArgumentParser ( description = 'Super-resolution: Upscale and interpolate video using STARnet' )
@@ -25,7 +30,7 @@ parser = argparse.ArgumentParser ( description = 'Super-resolution: Upscale and 
 parser.add_argument ( 'input', help='input video file or frames directory' )
 parser.add_argument ( 'output', nargs='?', help='output frames directory' )
 parser.add_argument ( '--scene',
-                      metavar='[[HH:]MM:]SS[.mmm]|# -/+ [[HH:]MM:]SS[.mmm]|#',
+                      metavar='[[HH:]MM:]SS[.ms]|# -/+ [[HH:]MM:]SS[.ms]|#',
                       help='video file time or frame range' )
 parser.add_argument ( '--interpolate', dest='interpolate', action='store_true',
                       help='save additional interpolated frames' )
@@ -44,65 +49,52 @@ parser.add_argument ( '--debug', type=int, choices=range(3), default=0 )
 
 opt = parser.parse_args()
 
+opt.zoom = 4 # Hard-coded for STARnet
 if opt.cuda: opt.cuda = torch.cuda.is_available()
 
 if opt.scene:
-  ts = '(?:(?:(?:\d+:)?[0-5]?\d):[0-5]?|0\d*)\d(?:\.\d*)?|(?:(?:(?:\d+:)?[0-5]?\d)?:[0-5]?|\d*)\d\.\d*' # ffmpeg time duration
+  ts = '(?:(?:(?:\d+:)?[0-5]?\d):[0-5]?|0\d*)\d(?:\.\d*)?|(?:(?:(?:\d+:)?[0-5]?\d)?:[0-5]?|\d*)\d\.\d*'
   opt.scene = re.search(
-      f"^(?:(?P<st>{ts})(?:-(?P<et>{ts})|\+(?P<tt>{ts})|\+(?P<vf>\d+))?" \
-        +f"|(?P<sf>\d+)(?:-(?P<ef>\d+)|\+(?P<tf>\d+))?)$",
+      f"^(?:(?P<st>{ts})(?:-(?P<et1>{ts})|-(?P<ef1>\d+)|\+(?P<tf1>\d+)" \
+                                                    +f"|\+(?P<tt>{ts}))?" \
+         +f"|(?P<sf>\d+)(?:-(?P<et2>{ts})|-(?P<ef2>\d+)|\+(?P<tf2>\d+))?)$",
     opt.scene)
   if not opt.scene:
     raise ValueError("--scene must be a valid time or frame range")
   opt.scene = opt.scene.groupdict()
+  for v in ['et','ef','tf']:
+    opt.scene[v] = opt.scene[v+'1'] if opt.scene[v+'2'] is None \
+                                  else opt.scene[v+'2']
+    opt.scene.pop(v+'1',None)
+    opt.scene.pop(v+'2',None)
 
 input_dir = opt.input
-if   not os.path.exists ( opt.input ) or \
-     ( opt.scene and not os.path.isfile ( opt.input ) ):
-  raise FileNotFoundError(f"Input '{opt.input}' not found.")
-elif os.path.isfile ( opt.input ):
-  input_dir = os.path.join ( os.path.dirname ( opt.input ),
-                             '.'+os.path.basename ( opt.input )+'.inp' )
+if   not os.path.exists ( input_dir ) or \
+     ( opt.scene and not os.path.isfile ( input_dir ) ):
+  raise FileNotFoundError(f"Input '{input_dir}' not found.")
+elif os.path.isfile ( input_dir ):
+  input_dir = os.path.join ( os.path.dirname ( input_dir ),
+                             '.'+os.path.basename ( input_dir )+'.inp' )
 else:
   opt.input = re.sub (r'/$', '', opt.input )
 
-if opt.output is None:
-  opt.output = os.path.join ( os.path.dirname ( opt.input ),
-                              '.'+os.path.basename ( opt.input )+'.out' )
-if input_dir == opt.output: opt.resume = False
+output_dir = opt.output
+if opt.output is not None and os.path.isfile ( opt.input ) and \
+   ( os.path.isfile ( opt.output ) or                          \
+     re.search(r'(^|/)[^.].*\.[^/]+$',opt.output) ):
+  output_dir = None
+else:
+  opt.output = ''
+if output_dir is None:
+  output_dir = os.path.join ( os.path.dirname ( opt.input ),
+                          '.'+os.path.basename ( opt.input )+'.out' )
+if input_dir == output_dir: opt.resume = False
 if opt.debug > 1: print('opt =', opt)
 
-if os.path.isfile ( opt.input ):
-  if not opt.debug: print(f"Extracting frames from '{opt.input}' ...", end='')
-  else: print(f"Extracting frames from '{opt.input}' using ffmpeg")
+if os.path.isfile ( opt.input ): # Extract frames using FFmpeg
+  ffmpeg_extract_frames(opt, input_dir)
 
-  command = 'ffmpeg'
-  if   opt.debug == 0: command += ' -loglevel fatal -hide_banner'
-  elif opt.debug == 1: command += ' -loglevel warning -hide_banner'
-  if opt.resume: command += ' -n' # This doesn't work
-  command += ' -i '+shlex.quote(opt.input)
-
-  output = '%06d.png'
-  if   not opt.scene: pass
-  elif opt.scene['st'] is not None:
-    command += f" -ss {opt.scene['st']}"
-    output = f"{opt.scene['st']}+%06d.png"
-    if   opt.scene['et'] is not None: command += f" -to {opt.scene['et']}"
-    elif opt.scene['tt'] is not None: command += f" -t {opt.scene['tt']}"
-    elif opt.scene['vf'] is not None: command += f" -vframes {opt.scene['vf']}"
-  elif opt.scene['sf'] is not None and opt.scene['ef'] is not None: command += f" -vf \"select='between(n,{opt.scene['sf']},{opt.scene['ef']})'\" -vsync 0 -start_number {opt.scene['sf']}"
-  elif opt.scene['sf'] is not None and opt.scene['tf'] is not None: command += f" -vf \"select='between(n,{opt.scene['sf']},{int(opt.scene['sf'])+int(opt.scene['tf'])})'\" -vsync 0 -start_number {opt.scene['sf']}"
-  elif opt.scene['sf'] is not None: command += f" -vf \"select='gte(n,{opt.scene['sf']})'\" -vsync 0 -start_number {opt.scene['sf']}"
-  command += ' '+shlex.quote(os.path.join(input_dir,output))+' >/dev/null'
-
-  if opt.debug > 1: print('command =', command)
-  if not opt.resume and os.path.exists(input_dir):
-    for f in glob.glob(os.path.join(input_dir,'*.png')): os.remove(f)
-  if not os.path.exists(input_dir): os.makedirs(input_dir)
-  os.system ( command )
-  if not opt.debug: print(' done.')
-
-if not os.path.exists(opt.output): os.makedirs(opt.output)
+if not os.path.exists(output_dir): os.makedirs(output_dir)
 
 if opt.debug:
   print('Setting up model: FBPNSR')
@@ -203,7 +195,7 @@ if opt.debug:
 else:
   print(f"Processing frames in '{input_dir}'", end='')
 
-frames = frames_from_files ( input_dir, opt.output )
+frames = frames_from_files ( input_dir, output_dir )
 for frame in data.DataLoader ( dataset=frames, num_workers=opt.threads,
                                batch_size=opt.testBatchSize, shuffle=False ):
   i = frame.pop().numpy()[0] # Hacky way to get index...
@@ -247,6 +239,9 @@ for frame in data.DataLoader ( dataset=frames, num_workers=opt.threads,
 
   if not opt.debug: print('.', end='')
 if not opt.debug: print('')
+
+if opt.output: # Replace frames using FFmpeg (experimental)
+  ffmpeg_replace_frames(opt, input_dir, output_dir)
 
 def chop_forward(t_im1, t_im2, t_flow_f, t_flow_b, iter, model, shave=8, min_size=160000, nGPUs=opt.gpus):
     b, c, h, w = t_im1.size()
