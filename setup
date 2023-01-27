@@ -47,8 +47,6 @@ else
     sh pytorch/*.sh -b -p pytorch -f
     rm pytorch/*.sh
     source pytorch/bin/activate
-    # Older Python is required to reduce forward-compatibility problems:
-    conda install -y python=3.7
   fi
   echo
 fi
@@ -77,6 +75,7 @@ EOF
 else
   # Install via conda:
   cat <<EOF >pytorch/requirements.txt
+python=3.7
 scikit-image
 opencv
 torchvision=0.8.2
